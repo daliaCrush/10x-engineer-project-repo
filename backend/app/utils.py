@@ -1,50 +1,72 @@
-"""Utility functions for PromptLab"""
+"""Utility functions for filtering, searching, and sorting prompts."""
 
 from typing import List
+
 from app.models import Prompt
 
 
-def sort_prompts_by_date(prompts: List[Prompt], descending: bool = True) -> List[Prompt]:
-    """Sort prompts by creation date.
-    
-    Note: There might be a bug here. Check the sort order!
+def sort_prompts_by_date(
+    prompts: List[Prompt],
+    descending: bool = True,
+) -> List[Prompt]:
+    """Sort prompts by creation time.
+
+    Args:
+        prompts: Prompts to sort.
+        descending: Whether to return newest prompts first.
+
+    Returns:
+        A new list sorted by each prompt's creation time.
     """
-    # BUG #3: This sorts ascending (oldest first) when it should sort descending (newest first)
-    # The 'descending' parameter is ignored!
-    return sorted(prompts, key=lambda p: p.created_at)
+    return sorted(
+        prompts,
+        key=lambda prompt: prompt.created_at,
+        reverse=descending,
+    )
 
 
-def filter_prompts_by_collection(prompts: List[Prompt], collection_id: str) -> List[Prompt]:
-    return [p for p in prompts if p.collection_id == collection_id]
+def filter_prompts_by_collection(
+    prompts: List[Prompt],
+    collection_id: str,
+) -> List[Prompt]:
+    """Filter prompts by collection identifier.
 
+    Args:
+        prompts: Prompts to filter.
+        collection_id: Collection identifier to match.
 
-def search_prompts(prompts: List[Prompt], query: str) -> List[Prompt]:
-    query_lower = query.lower()
+    Returns:
+        Prompts belonging to the specified collection.
+    """
     return [
-        p for p in prompts 
-        if query_lower in p.title.lower() or 
-           (p.description and query_lower in p.description.lower())
+        prompt
+        for prompt in prompts
+        if prompt.collection_id == collection_id
     ]
 
 
-def validate_prompt_content(content: str) -> bool:
-    """Check if prompt content is valid.
-    
-    A valid prompt should:
-    - Not be empty
-    - Not be just whitespace
-    - Be at least 10 characters
-    """
-    if not content or not content.strip():
-        return False
-    return len(content.strip()) >= 10
+def search_prompts(
+    prompts: List[Prompt],
+    query: str,
+) -> List[Prompt]:
+    """Search prompt titles, content, and descriptions.
 
+    Args:
+        prompts: Prompts to search.
+        query: Case-insensitive search text.
 
-def extract_variables(content: str) -> List[str]:
-    """Extract template variables from prompt content.
-    
-    Variables are in the format {{variable_name}}
+    Returns:
+        Prompts containing the search text in a searchable field.
     """
-    import re
-    pattern = r'\{\{(\w+)\}\}'
-    return re.findall(pattern, content)
+    normalized_query = query.lower()
+
+    return [
+        prompt
+        for prompt in prompts
+        if normalized_query in prompt.title.lower()
+        or normalized_query in prompt.content.lower()
+        or (
+            prompt.description is not None
+            and normalized_query in prompt.description.lower()
+        )
+    ]
