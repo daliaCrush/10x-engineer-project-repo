@@ -1,312 +1,481 @@
 # PromptLab System Model
 
-## Purpose and scope
+## Purpose and Scope
 
-PromptLab is a FastAPI backend for storing and organizing AI prompt templates. It currently supports prompts, optional prompt collections, filtering, searching, and in-memory CRUD operations.
+PromptLab is a FastAPI backend for storing, organizing, searching, and managing reusable AI prompts.
 
-This document describes the application’s current behavior before the Module 1 bug fixes. Required behavior that has not yet been implemented is identified separately so it is not confused with working behavior.
+The completed Module 1 backend supports:
 
-## Application startup
+- Prompt creation, retrieval, listing, replacement, partial updates, and deletion
+- Collection creation, retrieval, listing, and deletion
+- Optional relationships between prompts and collections
+- Filtering prompts by collection
+- Case-insensitive prompt search
+- Prompt sorting by creation time
+- In-memory storage
+- Request validation with Pydantic
+- Automated API and utility tests
+
+This document describes the verified system after the Module 1 bug fixes and PATCH implementation.
+
+## Application Startup
 
 The application starts in `backend/main.py`.
 
-When the file is executed directly, it starts Uvicorn with:
+When executed directly, it starts Uvicorn with:
 
-* Application: `app.api.app`
-* Host: `0.0.0.0`
-* Port: `8000`
-* Automatic reload: enabled
+- Application: `app.api.app`
+- Host: `0.0.0.0`
+- Port: `8000`
+- Automatic reload: enabled
 
-`backend/app/api.py` creates the FastAPI application using version `0.1.0` from `backend/app/__init__.py`.
+`backend/app/api.py` creates the FastAPI application using the application version exported by `backend/app/__init__.py`.
 
-The application installs `CORSMiddleware` with all origins, methods, and headers allowed. This is a permissive development configuration.
+The application installs `CORSMiddleware` with all origins, methods, and headers allowed. This is a permissive development configuration and would require tighter restrictions before production use.
 
-## Major components
+## Major Components
 
-| Component                   | Responsibility                                                                                             |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `backend/main.py`           | Starts the Uvicorn development server.                                                                     |
-| `backend/app/api.py`        | Creates the FastAPI application and defines every HTTP endpoint.                                           |
-| `backend/app/models.py`     | Defines request, stored-resource, and response models with Pydantic. It also generates IDs and timestamps. |
-| `backend/app/storage.py`    | Stores prompts and collections in memory and provides CRUD methods.                                        |
-| `backend/app/utils.py`      | Provides prompt sorting, filtering, searching, content validation, and variable extraction utilities.      |
-| `backend/tests/conftest.py` | Provides test fixtures and resets shared storage between tests.                                            |
-| `backend/tests/test_api.py` | Exercises the API through FastAPI’s `TestClient`.                                                          |
+| Component | Responsibility |
+|---|---|
+| `backend/main.py` | Starts the Uvicorn development server. |
+| `backend/app/api.py` | Creates the FastAPI application and defines its HTTP endpoints. |
+| `backend/app/models.py` | Defines request, stored-resource, and response models using Pydantic. |
+| `backend/app/storage.py` | Stores prompts and collections in memory and provides CRUD methods. |
+| `backend/app/utils.py` | Provides prompt sorting, filtering, searching, validation, and template-variable extraction. |
+| `backend/tests/conftest.py` | Provides test fixtures and resets shared storage between tests. |
+| `backend/tests/test_api.py` | Exercises the API and sorting utility through 24 automated tests. |
 
-## API routes
+## General Request Flow
 
-### Health route
+1. Uvicorn receives an HTTP request.
+2. `CORSMiddleware` processes applicable cross-origin headers.
+3. FastAPI matches the HTTP method and path to a route in `backend/app/api.py`.
+4. FastAPI extracts path and query parameters.
+5. If the request contains JSON, Pydantic validates it against the declared request model.
+6. The route performs any additional resource or collection-reference validation.
+7. The route calls utility functions or the global storage instance.
+8. The storage layer reads or modifies its in-memory dictionaries.
+9. The route returns a result or raises `HTTPException`.
+10. FastAPI validates and serializes successful responses through the declared response model.
 
-| Method | Path      | Function         | Request               | Storage or utility calls | Response                   | Current errors          |
-| ------ | --------- | ---------------- | --------------------- | ------------------------ | -------------------------- | ----------------------- |
-| GET    | `/health` | `health_check()` | No body or parameters | None                     | `HealthResponse`; HTTP 200 | No explicit error cases |
+Invalid Pydantic request bodies return HTTP `422` before the route’s main logic executes.
 
-`health_check()` returns a status of `healthy` and the application version.
+## API Routes
 
-### Prompt routes
+### Health
 
-| Method | Path                   | Function          | Request                                                  | Storage and utility calls                                                                                                                      | Success response              | Current errors                                                                                                                                                                               |
-| ------ | ---------------------- | ----------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/prompts`             | `list_prompts()`  | Optional `collection_id` and `search` query parameters   | `storage.get_all_prompts()`, optionally `filter_prompts_by_collection()` and `search_prompts()`, followed by `sort_prompts_by_date()`          | `PromptList`; HTTP 200        | No explicit errors. An unknown collection ID produces an empty list.                                                                                                                         |
-| GET    | `/prompts/{prompt_id}` | `get_prompt()`    | String `prompt_id` path parameter                        | `storage.get_prompt()`                                                                                                                         | `Prompt`; HTTP 200 when found | A missing prompt causes an unhandled `AttributeError` when the function accesses `prompt.id`. A running server would ordinarily return HTTP 500; the test client can re-raise the exception. |
-| POST   | `/prompts`             | `create_prompt()` | `PromptCreate` JSON body                                 | If `collection_id` is truthy, `storage.get_collection()` validates it. The endpoint constructs a `Prompt` and calls `storage.create_prompt()`. | Created `Prompt`; HTTP 201    | HTTP 400 when the referenced collection does not exist; HTTP 422 when Pydantic request validation fails.                                                                                     |
-| PUT    | `/prompts/{prompt_id}` | `update_prompt()` | String `prompt_id` and complete `PromptUpdate` JSON body | `storage.get_prompt()`, optional `storage.get_collection()`, construction of a replacement `Prompt`, and `storage.update_prompt()`             | Updated `Prompt`; HTTP 200    | HTTP 404 when the prompt does not exist; HTTP 400 when a referenced collection does not exist; HTTP 422 when request validation fails.                                                       |
-| DELETE | `/prompts/{prompt_id}` | `delete_prompt()` | String `prompt_id` path parameter                        | `storage.delete_prompt()`                                                                                                                      | No body; HTTP 204             | HTTP 404 when the prompt does not exist.                                                                                                                                                     |
+| Method | Path | Function | Response | Errors |
+|---|---|---|---|---|
+| `GET` | `/health` | `health_check()` | `HealthResponse`; HTTP `200` | No explicit error cases |
 
-The application does not currently expose `PATCH /prompts/{prompt_id}`.
+The response contains:
 
-### Collection routes
+- `status`: `healthy`
+- `version`: current application version
 
-| Method | Path                           | Function              | Request                               | Storage calls                                                     | Success response               | Current errors                                                                                         |
-| ------ | ------------------------------ | --------------------- | ------------------------------------- | ----------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| GET    | `/collections`                 | `list_collections()`  | No body or parameters                 | `storage.get_all_collections()`                                   | `CollectionList`; HTTP 200     | No explicit errors                                                                                     |
-| GET    | `/collections/{collection_id}` | `get_collection()`    | String `collection_id` path parameter | `storage.get_collection()`                                        | `Collection`; HTTP 200         | HTTP 404 when the collection does not exist                                                            |
-| POST   | `/collections`                 | `create_collection()` | `CollectionCreate` JSON body          | Constructs a `Collection` and calls `storage.create_collection()` | Created `Collection`; HTTP 201 | HTTP 422 when Pydantic request validation fails                                                        |
-| DELETE | `/collections/{collection_id}` | `delete_collection()` | String `collection_id` path parameter | `storage.delete_collection()`                                     | No body; HTTP 204              | HTTP 404 when the collection does not exist. Prompts assigned to a deleted collection are not updated. |
+### Prompts
 
-There are no collection update or partial-update routes.
+| Method | Path | Function | Request | Success | Errors |
+|---|---|---|---|---|---|
+| `GET` | `/prompts` | `list_prompts()` | Optional `collection_id` and `search` query parameters | `PromptList`; HTTP `200` | No explicit errors |
+| `GET` | `/prompts/{prompt_id}` | `get_prompt()` | Prompt ID path parameter | `Prompt`; HTTP `200` | HTTP `404` when missing |
+| `POST` | `/prompts` | `create_prompt()` | `PromptCreate` body | Created `Prompt`; HTTP `201` | HTTP `400` for an invalid collection; HTTP `422` for invalid data |
+| `PUT` | `/prompts/{prompt_id}` | `update_prompt()` | Prompt ID and complete `PromptUpdate` body | Updated `Prompt`; HTTP `200` | HTTP `404`, `400`, or `422` |
+| `PATCH` | `/prompts/{prompt_id}` | `patch_prompt()` | Prompt ID and partial `PromptPatch` body | Updated `Prompt`; HTTP `200` | HTTP `404`, `400`, or `422` |
+| `DELETE` | `/prompts/{prompt_id}` | `delete_prompt()` | Prompt ID path parameter | No body; HTTP `204` | HTTP `404` when missing |
 
-## Request-to-response flow
+### Collections
 
-### General request flow
+| Method | Path | Function | Request | Success | Errors |
+|---|---|---|---|---|---|
+| `GET` | `/collections` | `list_collections()` | No parameters | `CollectionList`; HTTP `200` | No explicit errors |
+| `GET` | `/collections/{collection_id}` | `get_collection()` | Collection ID path parameter | `Collection`; HTTP `200` | HTTP `404` when missing |
+| `POST` | `/collections` | `create_collection()` | `CollectionCreate` body | Created `Collection`; HTTP `201` | HTTP `422` for invalid data |
+| `DELETE` | `/collections/{collection_id}` | `delete_collection()` | Collection ID path parameter | No body; HTTP `204` | HTTP `404` when missing |
 
-1. Uvicorn receives the HTTP request and passes it to the FastAPI application.
-2. `CORSMiddleware` processes applicable cross-origin request and response headers.
-3. FastAPI matches the HTTP method and path to an endpoint in `backend/app/api.py`.
-4. FastAPI extracts path and query parameters and uses the Pydantic model declared by the endpoint to validate a request body when one is present.
-5. The endpoint performs any additional collection-reference validation.
-6. The endpoint calls utility functions or the global storage instance as required.
-7. The storage layer reads or changes its in-memory dictionaries and returns a model, list, Boolean result, or `None`.
-8. The endpoint returns its result or raises `HTTPException`.
-9. FastAPI validates and serializes successful data through the declared response model. Delete operations return HTTP 204 with no response body.
+The backend does not currently expose collection update routes.
 
-Invalid Pydantic request bodies are rejected with HTTP 422 before the endpoint’s main logic executes.
+## Prompt Operations
 
-### Creating a prompt
+### Create a Prompt
 
 For `POST /prompts`:
 
-1. FastAPI validates the JSON body as `PromptCreate`.
-2. If `collection_id` is truthy, `create_prompt()` checks it with `storage.get_collection()`.
-3. An unknown collection causes HTTP 400.
-4. The endpoint constructs a `Prompt` from the validated request.
-5. `Prompt` default factories generate a UUID string, `created_at`, and `updated_at`.
-6. `storage.create_prompt()` inserts the object into `_prompts`, keyed by its ID.
-7. FastAPI serializes the object as `Prompt` and returns HTTP 201.
+1. FastAPI validates the body as `PromptCreate`.
+2. If `collection_id` is non-null, the route verifies that the collection exists.
+3. An unknown collection produces HTTP `400`.
+4. The route constructs a `Prompt`.
+5. Default factories generate its ID and timestamps.
+6. `storage.create_prompt()` inserts the prompt into `_prompts`.
+7. FastAPI returns the created prompt with HTTP `201`.
 
-### Listing prompts
+### List Prompts
 
 For `GET /prompts`:
 
-1. `list_prompts()` retrieves every prompt through `storage.get_all_prompts()`.
-2. If `collection_id` was provided, `filter_prompts_by_collection()` retains prompts whose `collection_id` exactly matches it.
-3. The endpoint does not verify that the requested collection exists. A nonexistent ID therefore produces an empty result.
-4. If `search` was provided, `search_prompts()` performs a case-insensitive substring search against each prompt’s title and optional description.
-5. `sort_prompts_by_date()` is called with `descending=True`.
-6. The current utility ignores that argument and sorts by `created_at` in ascending order.
-7. The endpoint returns `PromptList`, containing the resulting list and its length as `total`.
+1. `storage.get_all_prompts()` retrieves every stored prompt.
+2. If `collection_id` was provided, `filter_prompts_by_collection()` retains exact matches.
+3. If `search` was provided, `search_prompts()` performs a case-insensitive substring search.
+4. `sort_prompts_by_date()` sorts the resulting prompts newest first.
+5. The route returns a `PromptList` with the prompts and their count.
 
 Filtering occurs before searching, and sorting occurs after both operations.
 
-### Retrieving one prompt
+An unknown collection ID used as a filter produces an empty list rather than HTTP `404`.
+
+### Retrieve One Prompt
 
 For `GET /prompts/{prompt_id}`:
 
 1. `get_prompt()` calls `storage.get_prompt(prompt_id)`.
-2. The storage method performs a dictionary lookup and returns a `Prompt` or `None`.
-3. When a prompt exists, the endpoint returns it.
-4. When it does not exist, the endpoint accesses `.id` on `None`.
-5. This raises an unhandled `AttributeError` instead of the required HTTP 404 response.
+2. Storage returns a `Prompt` or `None`.
+3. A stored prompt is returned with HTTP `200`.
+4. A missing prompt causes the route to raise HTTP `404`.
 
-### Replacing a prompt
+This behavior fixes the original unhandled `AttributeError`.
+
+### Replace a Prompt
 
 For `PUT /prompts/{prompt_id}`:
 
 1. FastAPI requires a complete `PromptUpdate` body.
-2. `update_prompt()` retrieves the existing prompt.
-3. A missing prompt produces HTTP 404.
-4. If the submitted `collection_id` is truthy, the endpoint verifies that the collection exists.
-5. An unknown collection produces HTTP 400.
-6. The endpoint creates a replacement `Prompt`, preserving the existing ID and `created_at`.
-7. The current implementation also preserves the old `updated_at`, which is a bug.
-8. `storage.update_prompt()` replaces the dictionary entry.
-9. FastAPI returns the updated prompt with HTTP 200.
+2. The route retrieves the existing prompt.
+3. A missing prompt produces HTTP `404`.
+4. A non-null `collection_id` is validated.
+5. An unknown collection produces HTTP `400`.
+6. The route constructs a replacement `Prompt`.
+7. The existing `id` and `created_at` are preserved.
+8. `updated_at` is set using `get_current_time()`.
+9. `storage.update_prompt()` replaces the stored prompt.
+10. The updated prompt is returned with HTTP `200`.
 
-`PromptUpdate` inherits `PromptBase`, so `title` and `content` are required. It supports full replacement but cannot provide true partial-update behavior.
+`PUT` represents a full replacement because `PromptUpdate` requires `title` and `content`.
 
-### Deleting a prompt
+### Partially Update a Prompt
+
+For `PATCH /prompts/{prompt_id}`:
+
+1. FastAPI validates the body as `PromptPatch`.
+2. The route retrieves the existing prompt.
+3. A missing prompt produces HTTP `404`.
+4. `model_dump(exclude_unset=True)` extracts only explicitly supplied fields.
+5. A supplied, non-null `collection_id` is validated.
+6. An unknown collection produces HTTP `400`.
+7. Existing prompt data is merged with the supplied patch fields.
+8. `updated_at` is refreshed.
+9. A new validated `Prompt` is constructed.
+10. Storage replaces the existing prompt.
+11. The updated prompt is returned with HTTP `200`.
+
+PATCH distinguishes omitted fields from explicit `null` values:
+
+- Omitted fields remain unchanged.
+- `description: null` clears the description.
+- `collection_id: null` detaches the prompt from its collection.
+- `title: null` is rejected with HTTP `422`.
+- `content: null` is rejected with HTTP `422`.
+
+### Delete a Prompt
 
 For `DELETE /prompts/{prompt_id}`:
 
-1. `delete_prompt()` calls `storage.delete_prompt()`.
-2. Storage removes the dictionary entry and returns `True` when the ID exists.
-3. The endpoint returns HTTP 204.
-4. If the ID is absent, storage returns `False` and the endpoint raises HTTP 404.
+1. The route calls `storage.delete_prompt()`.
+2. Storage deletes the prompt and returns `True` when it exists.
+3. The route returns HTTP `204`.
+4. If the prompt is missing, storage returns `False` and the route raises HTTP `404`.
 
-### Deleting a collection
+## Collection Operations
+
+### Create a Collection
+
+For `POST /collections`:
+
+1. FastAPI validates the body as `CollectionCreate`.
+2. The route constructs a `Collection`.
+3. Default factories generate its ID and creation timestamp.
+4. Storage adds it to `_collections`.
+5. The route returns HTTP `201`.
+
+### Delete a Collection
 
 For `DELETE /collections/{collection_id}`:
 
-1. `delete_collection()` calls `storage.delete_collection()`.
-2. Storage removes the collection when it exists.
-3. A missing collection produces HTTP 404.
-4. The endpoint returns HTTP 204 after a successful deletion.
-5. No code finds or updates prompts that reference the deleted collection.
-6. Those prompts remain in `_prompts` with a `collection_id` that no longer resolves to a collection.
+1. The route verifies that the collection exists.
+2. A missing collection produces HTTP `404`.
+3. `storage.get_prompts_by_collection()` finds associated prompts.
+4. Each associated prompt is reconstructed with:
+   - `collection_id` set to `None`
+   - `updated_at` set to the current time
+5. Storage replaces each updated prompt.
+6. Storage deletes the collection.
+7. The route returns HTTP `204`.
 
-## Data models
+Prompts are preserved when their collection is deleted. Clearing their references prevents orphaned collection IDs.
 
-### Prompt models
+## Data Models
+
+### PromptBase
 
 `PromptBase` defines:
 
-* `title`: required string, 1–200 characters
-* `content`: required nonempty string
-* `description`: optional string, maximum 500 characters
-* `collection_id`: optional string
+- `title`: required string, 1–200 characters
+- `content`: required nonempty string
+- `description`: optional string, maximum 500 characters
+- `collection_id`: optional string
 
-`PromptCreate` inherits all fields from `PromptBase`.
+### PromptCreate
 
-`PromptUpdate` also inherits all fields from `PromptBase`. It therefore requires `title` and `content` and represents a complete update rather than a partial update.
+`PromptCreate` inherits all fields from `PromptBase` and is used by `POST /prompts`.
 
-`Prompt` adds:
+### PromptUpdate
 
-* `id`: UUID string generated by `generate_id()`
-* `created_at`: generated by `get_current_time()`
-* `updated_at`: generated by `get_current_time()`
+`PromptUpdate` inherits all fields from `PromptBase` and is used by `PUT /prompts/{prompt_id}`.
 
-`get_current_time()` uses `datetime.utcnow()` and returns a naive UTC `datetime`.
+Because `title` and `content` remain required, it represents a complete update rather than a partial update.
 
-### Collection models
+### PromptPatch
+
+`PromptPatch` defines every editable prompt field as optional so clients can send only the fields they want to change.
+
+It uses a Pydantic field validator to reject explicitly supplied null values for:
+
+- `title`
+- `content`
+
+The default values allow those fields to be omitted. The endpoint uses `exclude_unset=True` to distinguish omission from explicit null.
+
+### Prompt
+
+`Prompt` extends `PromptBase` with:
+
+- `id`: UUID string generated by `generate_id()`
+- `created_at`: timestamp generated by `get_current_time()`
+- `updated_at`: timestamp generated by `get_current_time()`
+
+`get_current_time()` currently uses `datetime.utcnow()` and produces a naive UTC `datetime`.
+
+### Collection Models
 
 `CollectionBase` defines:
 
-* `name`: required string, 1–100 characters
-* `description`: optional string, maximum 500 characters
+- `name`: required string, 1–100 characters
+- `description`: optional string, maximum 500 characters
 
 `CollectionCreate` inherits the collection input fields.
 
 `Collection` adds:
 
-* `id`: generated UUID string
-* `created_at`: generated timestamp
+- `id`: UUID string generated by `generate_id()`
+- `created_at`: timestamp generated by `get_current_time()`
 
-### List and health models
+### Response Models
 
-* `PromptList` contains `prompts: List[Prompt]` and `total: int`.
-* `CollectionList` contains `collections: List[Collection]` and `total: int`.
-* `HealthResponse` contains `status: str` and `version: str`.
+- `PromptList` contains `prompts: List[Prompt]` and `total: int`.
+- `CollectionList` contains `collections: List[Collection]` and `total: int`.
+- `HealthResponse` contains `status: str` and `version: str`.
 
-## Prompt and collection relationship
+## Prompt and Collection Relationship
 
-The relationship is represented only by the optional `Prompt.collection_id` string.
+The relationship is represented by `Prompt.collection_id`.
 
-A collection can be referenced by many prompts, while each prompt can reference at most one collection. A prompt can also exist without a collection.
+A collection can be referenced by many prompts, while each prompt can reference at most one collection. A prompt may also exist without a collection.
 
-This resembles an optional many-to-one relationship, but the storage layer does not enforce it like a relational database would:
+This resembles an optional many-to-one relationship:
 
-* There is no foreign-key constraint.
-* Prompt creation and full update perform collection checks in the API layer.
-* Direct storage calls can insert a prompt containing any collection ID.
-* Listing by an unknown collection ID returns an empty list.
-* Deleting a collection does not delete its prompts or set their `collection_id` fields to `None`.
+- One collection can contain many prompts.
+- One prompt can belong to zero or one collection.
 
-The current behavior can therefore create orphaned prompt references.
+The storage layer does not enforce the relationship like a relational database:
 
-## In-memory storage
+- There is no foreign-key constraint.
+- Prompt creation, PUT, and PATCH validate collection references in the API layer.
+- Direct storage calls can bypass API validation.
+- Filtering with an unknown collection ID returns an empty list.
+- Collection deletion detaches associated prompts before deleting the collection.
+
+## In-Memory Storage
 
 `backend/app/storage.py` creates one global `Storage` instance named `storage`.
 
-The instance contains:
+It contains:
 
-* `_prompts: Dict[str, Prompt]`
-* `_collections: Dict[str, Collection]`
+- `_prompts: Dict[str, Prompt]`
+- `_collections: Dict[str, Collection]`
 
 Objects are keyed by their generated string IDs.
 
-The storage methods provide:
+The storage layer provides:
 
-* Prompt creation, retrieval, listing, replacement, and deletion
-* Collection creation, retrieval, listing, and deletion
-* Prompt lookup by collection
-* A `clear()` operation used to empty both dictionaries
+- Prompt creation
+- Prompt retrieval
+- Prompt listing
+- Prompt replacement
+- Prompt deletion
+- Collection creation
+- Collection retrieval
+- Collection listing
+- Collection deletion
+- Prompt lookup by collection
+- A `clear()` operation for resetting both dictionaries
 
-The layer returns stored Pydantic objects directly. It does not copy them, persist them to disk, enforce relationships, provide transactions, or protect concurrent changes.
+The storage layer returns stored Pydantic objects directly. It does not:
 
-Because storage is process memory:
+- Persist data to disk
+- Copy returned resources
+- Enforce relationships
+- Provide transactions
+- Protect concurrent updates
+- Share data between multiple application processes
 
-* All data disappears when the application restarts.
-* Multiple server processes would not share the same data.
-* IDs and timestamps are created by the models before objects enter storage.
-* Test isolation depends on clearing the global storage instance between tests.
+Consequences of in-memory storage include:
 
-## Utility behavior
+- All data disappears when the process restarts.
+- Multiple server processes would have separate data.
+- Models generate IDs and timestamps before storage.
+- Test isolation depends on clearing the global storage instance between tests.
+
+## Utility Behavior
 
 `backend/app/utils.py` contains five utilities:
 
-| Function                         | Current behavior                                                               | API usage                     |
-| -------------------------------- | ------------------------------------------------------------------------------ | ----------------------------- |
-| `sort_prompts_by_date()`         | Sorts by `created_at` in ascending order and ignores its `descending` argument | Used by `list_prompts()`      |
-| `filter_prompts_by_collection()` | Keeps prompts with an exactly matching `collection_id`                         | Used by `list_prompts()`      |
-| `search_prompts()`               | Performs case-insensitive substring matching against title and description     | Used by `list_prompts()`      |
-| `validate_prompt_content()`      | Rejects empty, whitespace-only, or fewer-than-ten-character content            | Not called by the current API |
-| `extract_variables()`            | Extracts word-character names contained in `{{variable}}` patterns             | Not called by the current API |
+| Function | Behavior | API usage |
+|---|---|---|
+| `sort_prompts_by_date()` | Sorts by `created_at` and honors its `descending` argument | Used by `list_prompts()` |
+| `filter_prompts_by_collection()` | Keeps prompts whose `collection_id` exactly matches | Used by `list_prompts()` |
+| `search_prompts()` | Searches title, content, and description using case-insensitive substring matching | Used by `list_prompts()` |
+| `validate_prompt_content()` | Requires at least ten non-whitespace characters | Not currently called by the API |
+| `extract_variables()` | Extracts word-character names inside `{{variable}}` patterns | Not currently called by the API |
 
-Although `validate_prompt_content()` requires ten non-whitespace characters, the Pydantic model currently requires only one character. Because the API does not call the utility, one-character content is currently accepted.
+The API’s Pydantic model requires prompt content to contain at least one character. The stricter `validate_prompt_content()` helper is not currently part of the request flow.
 
-## External dependencies
+## External Dependencies
 
-The direct dependencies are declared in `backend/requirements.txt`.
+Direct dependencies are declared in `backend/requirements.txt`.
 
-| Dependency |   Version | Role                                                                                                                                                                    |
-| ---------- | --------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FastAPI    | `0.109.0` | Defines the API application, routes, middleware integration, request handling, response models, `HTTPException`, and `TestClient` interface.                            |
-| Uvicorn    |  `0.27.0` | Runs the FastAPI application as an ASGI server from `backend/main.py`.                                                                                                  |
-| Pydantic   |   `2.5.3` | Defines and validates request, resource, and response models. It also serializes model data through `model_dump()`.                                                     |
-| pytest     |   `7.4.4` | Discovers and executes the backend test suite and fixtures.                                                                                                             |
-| pytest-cov |   `4.1.0` | Adds pytest coverage-reporting support when tests are run with coverage options.                                                                                        |
-| httpx      |  `0.26.0` | Provides the HTTP client used underneath Starlette/FastAPI `TestClient` during API tests. `test_api.py` does not import it directly, but test requests pass through it. |
+| Dependency | Version | Role |
+|---|---:|---|
+| FastAPI | `0.109.0` | API application, routing, middleware, validation integration, responses, and errors |
+| Uvicorn | `0.27.0` | ASGI development server |
+| Pydantic | `2.5.3` | Request, resource, and response validation and serialization |
+| pytest | `7.4.4` | Test discovery and execution |
+| pytest-cov | `4.1.0` | Optional test coverage reporting |
+| HTTPX | `0.26.0` | HTTP client used underneath FastAPI/Starlette `TestClient` |
 
-The backend also uses Python standard-library modules including `datetime`, `typing`, `uuid`, and `re`. These are not external packages and do not appear in `requirements.txt`.
+The backend also uses Python standard-library modules including:
 
-## Context strategy
+- `datetime`
+- `re`
+- `typing`
+- `uuid`
 
-I used file-level context throughout the exploration rather than sending the unrestricted repository to the AI.
+## Testing Model
 
-| Exploration stage                      | Context approach                                                                                                        | Reason                                                                                                                                                                                                                                                                                                                                                   |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Iteration 1: architecture discovery    | A selected file-level batch containing `README.md` and the complete backend source, dependency, startup, and test files | The backend is small and tightly coupled, so reading all relevant backend files was necessary to understand routes, models, storage, utilities, dependencies, and tests together. Generated directories, future frontend/spec directories, documentation, and configuration files were excluded because they could not explain current backend behavior. |
-| Iteration 2: function-level correction | Narrowed file-level context containing the application modules, tests, and dependency file                              | The first response found the broad structure but omitted exact parameters, calls, errors, and test weaknesses. Restricting the context to directly coupled implementation and test files made a route-by-route comparison possible.                                                                                                                      |
-| Iteration 3: evidence verification     | A tightly bounded file-level set containing startup, API, models, storage, utilities, tests, and dependencies           | The final pass was intended to distinguish current implementation behavior from required behavior. The README was excluded because source code and observed test behavior were the authoritative evidence for this stage.                                                                                                                                |
+`backend/tests/conftest.py` supplies:
 
-Whole-repository context was unnecessary because the repository contains directories for later modules and generated environment files unrelated to the current backend. The selected backend files are small enough to inspect together, while repeated narrowing made it easier to verify individual claims directly against functions and tests.
+- A FastAPI `TestClient`
+- Sample prompt data
+- Sample collection data
+- Automatic storage cleanup between tests
 
-This strategy matches the progression recorded in `docs/prompt-log.md`: broad backend discovery, focused function-level analysis, and a final evidence-checking pass.
+Automatic cleanup prevents one test’s in-memory records from leaking into another test.
 
-## Verified defects and missing behavior
+`backend/tests/test_api.py` contains 24 collected tests covering:
 
-The current source contains four required defects and one missing endpoint:
+- Health status
+- Prompt creation and listing
+- Successful and missing prompt retrieval
+- Prompt deletion
+- Full prompt replacement
+- Timestamp updates
+- Invalid collection references
+- Newest-first endpoint sorting
+- Both utility sorting directions
+- Partial prompt updates
+- Omitted-field preservation
+- Explicitly clearing nullable fields
+- Rejection of null title and content
+- Collection creation and listing
+- Missing collections
+- Collection deletion and prompt detachment
 
-1. `get_prompt()` fails with an unhandled exception when the prompt does not exist instead of raising HTTP 404.
-2. `update_prompt()` preserves the previous `updated_at` timestamp instead of generating a new one.
-3. `sort_prompts_by_date()` ignores `descending=True`, producing oldest-first results.
-4. `delete_collection()` leaves prompts referencing the deleted collection.
-5. `PATCH /prompts/{prompt_id}` is absent, and the existing `PromptUpdate` model requires fields that must be optional for a true partial update.
+The verified final result is:
 
-These statements describe the current implementation. The document must be reviewed and updated after the Module 1 fixes so the submitted system model matches the final code.
+```text
+24 passed
+```
 
-## Verification basis
+The test run also emits dependency and standard-library deprecation warnings. These warnings do not represent failed tests.
 
-This model was verified against:
+## Resolved Module 1 Defects
 
-* Route decorators and endpoint functions in `backend/app/api.py`
-* Model definitions and default factories in `backend/app/models.py`
-* Dictionary operations in `backend/app/storage.py`
-* Utility implementations in `backend/app/utils.py`
-* Server startup in `backend/main.py`
-* Versions in `backend/app/__init__.py`
-* Direct dependencies in `backend/requirements.txt`
-* Fixtures and behavior in `backend/tests/conftest.py`
-* Existing tests and baseline pytest behavior in `backend/tests/test_api.py`
+| Requirement | Original behavior | Final behavior | Verification |
+|---|---|---|---|
+| Missing prompt retrieval | Accessed `.id` on `None`, causing an unhandled exception | Returns HTTP `404` | `test_get_prompt_not_found` |
+| PUT timestamp | Preserved the previous `updated_at` | Generates a new timestamp | `test_update_prompt` |
+| Prompt sorting | Ignored `descending` and returned oldest first | Honors both sort directions; endpoint returns newest first | Sorting endpoint and utility tests |
+| Collection deletion | Left prompts with invalid collection references | Clears `collection_id` and refreshes `updated_at` | `test_delete_collection_with_prompts` |
+| Partial updates | PATCH route was absent | PATCH updates only explicitly supplied fields | PATCH test group |
 
-The baseline test run produced 10 passing tests and 3 failing tests. AI-generated observations were treated as hypotheses and corrected whenever they conflicted with source code or observed test behavior.
+## Current Limitations
+
+The Module 1 backend remains a development system:
+
+- Storage is not persistent.
+- There is no authentication or authorization.
+- CORS is unrestricted.
+- There is no concurrency control.
+- There are no database transactions.
+- Collection update routes are not implemented.
+- Prompt tags and version history are not implemented.
+- Prompt template execution is not implemented.
+- `datetime.utcnow()` and class-based Pydantic configuration produce deprecation warnings.
+- The stricter content-validation helper is not connected to API requests.
+
+These limitations are outside the completed Module 1 bug-fix scope.
+
+## AI-Assisted Context Strategy
+
+The codebase was explored through progressively narrower file-level context rather than unrestricted repository context.
+
+| Iteration | Context | Purpose |
+|---|---|---|
+| Iteration 1 | README plus backend source, startup, dependency, and test files | Build the initial architecture model |
+| Iteration 2 | Directly coupled API, model, storage, utility, and test files | Produce route- and function-level analysis |
+| Iteration 3 | Source code and observed test behavior | Correct unsupported assumptions and verify required behavior |
+| Implementation | Only files required for each backend change | Limit edits and make each change independently testable |
+
+Generated environments, caches, local configuration, frontend code, and future-module directories were excluded because they were not authoritative sources for the current backend.
+
+AI suggestions were treated as proposals rather than accepted automatically. They were compared with:
+
+- Existing source code
+- Pydantic version behavior
+- Route semantics
+- Git diffs
+- Focused tests
+- The complete test suite
+
+The detailed iterations are recorded in `docs/prompt-log.md`.
+
+## Verification Basis
+
+This system model was verified against:
+
+- `backend/main.py`
+- `backend/app/__init__.py`
+- `backend/app/api.py`
+- `backend/app/models.py`
+- `backend/app/storage.py`
+- `backend/app/utils.py`
+- `backend/requirements.txt`
+- `backend/tests/conftest.py`
+- `backend/tests/test_api.py`
+- The final pytest run
+
+Final verification:
+
+```text
+24 tests collected
+24 tests passed
+0 tests failed
+```

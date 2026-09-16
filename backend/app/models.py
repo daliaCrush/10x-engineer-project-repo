@@ -6,6 +6,13 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
+def generate_id() -> str:
+    """Generate a unique resource identifier.
+
+    Returns:
+        A UUID represented as a string.
+    """
+    return str(uuid4())
 
 def get_current_time() -> datetime:
     """Return the current UTC date and time.
@@ -84,7 +91,7 @@ class PromptPatch(BaseModel):
 class Prompt(PromptBase):
     """Stored prompt model."""
 
-    id: str = Field(default_factory=lambda: str(uuid4()))
+    id: str = Field(default_factory=generate_id)
     created_at: datetime = Field(default_factory=get_current_time)
     updated_at: datetime = Field(default_factory=get_current_time)
 
@@ -113,7 +120,7 @@ class CollectionCreate(CollectionBase):
 class Collection(CollectionBase):
     """Stored collection model."""
 
-    id: str = Field(default_factory=lambda: str(uuid4()))
+    id: str = Field(default_factory=generate_id)
     created_at: datetime = Field(default_factory=get_current_time)
 
     class Config:

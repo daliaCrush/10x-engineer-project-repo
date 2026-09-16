@@ -1,5 +1,6 @@
-"""Utility functions for filtering, searching, and sorting prompts."""
+"""Utility functions for working with prompts."""
 
+import re
 from typing import List
 
 from app.models import Prompt
@@ -70,3 +71,32 @@ def search_prompts(
             and normalized_query in prompt.description.lower()
         )
     ]
+
+
+def validate_prompt_content(content: str) -> bool:
+    """Validate that prompt content contains meaningful text.
+
+    Args:
+        content: Prompt content to validate.
+
+    Returns:
+        True when the content contains at least ten non-whitespace
+        characters; otherwise, False.
+    """
+    if not content or not content.strip():
+        return False
+
+    return len(content.strip()) >= 10
+
+
+def extract_variables(content: str) -> List[str]:
+    """Extract template variable names from prompt content.
+
+    Args:
+        content: Prompt content containing optional variables.
+
+    Returns:
+        Variable names found inside double curly braces.
+    """
+    pattern = r"\{\{(\w+)\}\}"
+    return re.findall(pattern, content)

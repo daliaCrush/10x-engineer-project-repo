@@ -2,157 +2,327 @@
 
 **Your AI Prompt Engineering Platform**
 
----
+PromptLab is an internal tool for AI engineers to store, organize, search, and manage reusable prompts. It is designed as a professional workspace—similar to a “Postman for Prompts.”
 
-## Welcome to the Team! 👋
+The broader PromptLab vision includes:
 
-Congratulations on joining the PromptLab engineering team! You've been brought on to help us build the next generation of prompt engineering tools.
+- Storing prompt templates with variables such as `{{input}}` and `{{context}}`
+- Organizing prompts into collections
+- Searching prompt titles, content, and descriptions
+- Tracking prompt versions
+- Testing prompts with sample inputs
+- Supporting collaborative prompt-engineering workflows
 
-### What is PromptLab?
+## Module 1 Backend
 
-PromptLab is an internal tool for AI engineers to **store, organize, and manage their prompts**. Think of it as a "Postman for Prompts" — a professional workspace where teams can:
+The current implementation provides a FastAPI backend with in-memory storage for prompts and collections.
 
-- 📝 Store prompt templates with variables (`{{input}}`, `{{context}}`)
-- 📁 Organize prompts into collections
-- 🏷️ Tag and search prompts
-- 📜 Track version history
-- 🧪 Test prompts with sample inputs
+Module 1 includes:
 
-### The Current Situation
+- Prompt creation, retrieval, listing, replacement, partial updates, and deletion
+- Collection creation, retrieval, listing, and deletion
+- Prompt filtering by collection
+- Case-insensitive prompt search
+- Newest-first prompt sorting
+- Validation of collection references
+- Safe collection deletion that detaches associated prompts
+- Automated API and utility tests
 
-The previous developer left us with a *partially working* backend. The core structure is there, but:
+The storage layer is currently in memory. Data is cleared whenever the application restarts.
 
-- There are **several bugs** that need fixing
-- Some **features are incomplete**
-- The **documentation is minimal** (you'll fix that)
-- There are **no tests** worth mentioning
-- **No CI/CD pipeline** exists
-- **No frontend** has been built yet
+## Prerequisites
 
-Your job over the next 4 weeks is to transform this into a **production-ready, full-stack application**.
+Install the following tools before running the project:
 
----
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.10+
-- Node.js 18+ (for Week 4)
+- Python 3.10 or newer
 - Git
+- Node.js 18 or newer for later frontend modules
 
-### Run Locally
+## Clone the Repository
 
 ```bash
-# Clone the repo
-git clone <your-repo-url>
-cd promptlab
+git clone https://github.com/daliaCrush/10x-engineer-project-repo.git
+cd 10x-engineer-project-repo
+```
 
-# Set up backend
+## Backend Setup
+
+### Windows PowerShell
+
+From the repository root:
+
+```powershell
 cd backend
-pip install -r requirements.txt
+python -m venv .venv
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
+If the virtual environment already exists, activate it with:
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+```
+
+### macOS or Linux
+
+From the repository root:
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+## Run the Backend
+
+With the virtual environment activated and the terminal inside `backend`:
+
+```bash
 python main.py
 ```
 
-API runs at: http://localhost:8000
+The API is available at:
 
-API docs at: http://localhost:8000/docs
+- API: [http://localhost:8000](http://localhost:8000)
+- Interactive API documentation: [http://localhost:8000/docs](http://localhost:8000/docs)
+- Alternative API documentation: [http://localhost:8000/redoc](http://localhost:8000/redoc)
+- Health check: [http://localhost:8000/health](http://localhost:8000/health)
 
-### Run Tests
+Stop the development server with `Ctrl + C`.
+
+## Run the Tests
+
+With the terminal inside `backend`:
 
 ```bash
-cd backend
-pytest tests/ -v
+python -m pytest tests -v
 ```
 
----
+The completed Module 1 test suite contains 24 tests covering:
+
+- Health checks
+- Prompt CRUD behavior
+- Full prompt replacement with `PUT`
+- Partial prompt updates with `PATCH`
+- Missing-resource responses
+- Invalid collection references
+- Prompt sorting in both directions
+- Collection deletion and prompt detachment
+- Explicitly clearing nullable fields
+- Validation of required prompt fields
+
+Current verified result:
+
+```text
+24 passed
+```
+
+The test run may display deprecation warnings from Python, Pydantic, or Starlette dependencies. These warnings do not represent test failures.
+
+## API Endpoints
+
+| Method | Endpoint | Description | Success |
+|---|---|---|---:|
+| `GET` | `/health` | Check API health | `200` |
+| `GET` | `/prompts` | List prompts | `200` |
+| `GET` | `/prompts/{prompt_id}` | Retrieve one prompt | `200` |
+| `POST` | `/prompts` | Create a prompt | `201` |
+| `PUT` | `/prompts/{prompt_id}` | Replace a prompt | `200` |
+| `PATCH` | `/prompts/{prompt_id}` | Partially update a prompt | `200` |
+| `DELETE` | `/prompts/{prompt_id}` | Delete a prompt | `204` |
+| `GET` | `/collections` | List collections | `200` |
+| `GET` | `/collections/{collection_id}` | Retrieve one collection | `200` |
+| `POST` | `/collections` | Create a collection | `201` |
+| `DELETE` | `/collections/{collection_id}` | Delete a collection | `204` |
+
+## List, Filter, and Search Prompts
+
+List all prompts:
+
+```http
+GET /prompts
+```
+
+Filter prompts by collection:
+
+```http
+GET /prompts?collection_id={collection_id}
+```
+
+Search prompt titles, content, and descriptions:
+
+```http
+GET /prompts?search=review
+```
+
+Filters and search can be combined:
+
+```http
+GET /prompts?collection_id={collection_id}&search=review
+```
+
+Prompt results are returned newest first.
+
+## Update Behavior
+
+### Full replacement with PUT
+
+`PUT /prompts/{prompt_id}` requires the complete editable prompt representation.
+
+Example:
+
+```json
+{
+  "title": "Updated prompt",
+  "content": "Updated prompt content",
+  "description": "Updated description",
+  "collection_id": null
+}
+```
+
+A successful update:
+
+- Preserves `id`
+- Preserves `created_at`
+- Updates `updated_at`
+- Validates a non-null `collection_id`
+
+### Partial update with PATCH
+
+`PATCH /prompts/{prompt_id}` changes only fields explicitly included in the request.
+
+Example:
+
+```json
+{
+  "title": "New title"
+}
+```
+
+Omitted fields remain unchanged.
+
+The nullable fields `description` and `collection_id` can be cleared explicitly:
+
+```json
+{
+  "description": null,
+  "collection_id": null
+}
+```
+
+The required fields `title` and `content` cannot be explicitly set to `null`. Invalid requests return HTTP `422`.
+
+## Collection Deletion Behavior
+
+Deleting a collection does not delete its prompts.
+
+When `DELETE /collections/{collection_id}` succeeds:
+
+1. Prompts assigned to the collection remain stored.
+2. Their `collection_id` values are changed to `null`.
+3. Their `updated_at` timestamps are refreshed.
+4. The collection is deleted.
+
+This prevents prompts from retaining invalid collection references.
+
+## Error Responses
+
+The backend returns:
+
+| Situation | Status |
+|---|---:|
+| Prompt not found | `404` |
+| Collection not found | `404` |
+| Nonexistent collection supplied for a prompt | `400` |
+| Invalid request data | `422` |
+
+Errors use FastAPI’s standard JSON structure:
+
+```json
+{
+  "detail": "Prompt not found"
+}
+```
 
 ## Project Structure
 
-```
-promptlab/
-├── README.md                    # You are here
-├── PROJECT_BRIEF.md             # Your assignment details
-├── GRADING_RUBRIC.md            # How you'll be graded
-│
+```text
+10x-engineer-project-repo/
+├── README.md
 ├── backend/
 │   ├── app/
 │   │   ├── __init__.py
-│   │   ├── api.py              # FastAPI routes (has bugs!)
-│   │   ├── models.py           # Pydantic models
-│   │   ├── storage.py          # In-memory storage
-│   │   └── utils.py            # Helper functions
+│   │   ├── api.py
+│   │   ├── models.py
+│   │   ├── storage.py
+│   │   └── utils.py
 │   ├── tests/
 │   │   ├── __init__.py
-│   │   ├── test_api.py         # Basic tests
-│   │   └── conftest.py         # Test fixtures
-│   ├── main.py                 # Entry point
+│   │   ├── conftest.py
+│   │   └── test_api.py
+│   ├── main.py
 │   └── requirements.txt
-│
-├── frontend/                    # You'll create this in Week 4
-├── specs/                       # You'll create this in Week 2
-├── docs/                        # You'll create this in Week 2
-└── .github/                     # You'll set up CI/CD in Week 3
+├── docs/
+│   ├── SYSTEM_MODEL.md
+│   └── prompt-log.md
+├── frontend/
+├── specs/
+└── .gitignore
 ```
 
----
+## Backend Components
 
-## Your Mission
+- `backend/main.py` starts the FastAPI application.
+- `backend/app/api.py` defines HTTP routes and request handling.
+- `backend/app/models.py` defines Pydantic request and response models.
+- `backend/app/storage.py` provides in-memory prompt and collection storage.
+- `backend/app/utils.py` provides filtering, searching, and sorting functions.
+- `backend/tests/conftest.py` provides isolated test fixtures.
+- `backend/tests/test_api.py` verifies endpoint and utility behavior.
 
-### 🧪 Experimentation Encouraged!
-While we provide guidelines, **you are the engineer**. If you see a better way to solve a problem using AI, do it!
-- Want to swap the storage layer for a real database? **Go for it.**
-- Want to add Authentication? **Do it.**
-- Want to rewrite the API in a different style? **As long as tests pass, you're clear.**
+## Documentation
 
-The goal is to learn how to build *better* software *faster* with AI. Don't be afraid to break things and rebuild them better.
+- `docs/SYSTEM_MODEL.md` documents the backend architecture and data flow.
+- `docs/prompt-log.md` records the AI-assisted development iterations.
+- `docs/ai-verification-note.md` records an AI-generated error and how it was identified and corrected.
 
-### Week 1: Fix the Backend
-- Understand this codebase using AI
-- Find and fix the bugs
-- Implement missing features
+## Technology Stack
 
-### Week 2: Document Everything
-- Write proper documentation
+- **Backend:** Python, FastAPI
+- **Validation:** Pydantic
+- **Server:** Uvicorn
+- **Testing:** pytest, FastAPI TestClient, HTTPX
+- **Storage:** In-memory Python dictionaries
+- **Frontend:** React and Vite planned for a later module
+- **DevOps:** Docker and GitHub Actions planned for a later module
+
+## Development Roadmap
+
+### Week 1: Backend Foundation
+
+- Understand the existing codebase
+- Fix the four known backend bugs
+- Implement partial prompt updates
+- Expand automated test coverage
+
+### Week 2: Documentation and Specifications
+
+- Document the system architecture
 - Create feature specifications
-- Set up coding standards
+- Establish coding standards
 
-### Week 3: Make it Production-Ready
-- Write comprehensive tests
-- Implement new features with TDD
-- Set up CI/CD and Docker
+### Week 3: Production Readiness
 
-### Week 4: Build the Frontend
-- Create a React frontend
+- Expand test coverage
+- Implement features using test-driven development
+- Add CI/CD and Docker support
+
+### Week 4: Frontend
+
+- Build the React frontend
 - Connect it to the backend
-- Polish the user experience
-
----
-
-## API Endpoints (Current)
-
-| Method | Endpoint | Description | Status |
-|--------|----------|-------------|--------|
-| GET | `/health` | Health check | ✅ Works |
-| GET | `/prompts` | List all prompts | ⚠️ Has issues |
-| GET | `/prompts/{id}` | Get single prompt | ❌ Bug |
-| POST | `/prompts` | Create prompt | ✅ Works |
-| PUT | `/prompts/{id}` | Update prompt | ⚠️ Has issues |
-| DELETE | `/prompts/{id}` | Delete prompt | ✅ Works |
-| GET | `/collections` | List collections | ✅ Works |
-| GET | `/collections/{id}` | Get collection | ✅ Works |
-| POST | `/collections` | Create collection | ✅ Works |
-| DELETE | `/collections/{id}` | Delete collection | ❌ Bug |
-
----
-
-## Tech Stack
-
-- **Backend**: Python 3.10+, FastAPI, Pydantic
-- **Frontend**: React, Vite (Week 4)
-- **Testing**: pytest
-- **DevOps**: Docker, GitHub Actions (Week 3)
-
----
-
-Good luck, and welcome to the team! 🚀
+- Refine the user experience

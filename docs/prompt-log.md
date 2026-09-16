@@ -263,3 +263,275 @@ Nevertheless, direct source verification was still necessary. More constraints i
 ### Conclusion
 
 The three iterations provide enough verified information to create `docs/SYSTEM_MODEL.md`, but the AI-generated analysis must be corrected before being used. I will base the system model on the source code and observed tests, using the AI responses as assistance rather than as the authority.
+
+## Iteration 4
+
+### Goal
+
+Develop a bounded implementation plan for the four required backend bug fixes and the missing PATCH endpoint without changing unrelated files.
+
+### Context provided
+
+I provided Continue with only the four files directly involved in the required changes:
+
+- `backend/app/api.py`
+- `backend/app/models.py`
+- `backend/app/utils.py`
+- `backend/tests/test_api.py`
+
+The storage implementation had already been inspected and did not require modification because it provided the necessary retrieval, update, deletion, and collection-lookup operations.
+
+### Prompt
+
+Implement the PromptLab Module 1 must-pass backend requirements.
+
+You may modify only:
+
+- `backend/app/api.py`
+- `backend/app/models.py`
+- `backend/app/utils.py`
+- `backend/tests/test_api.py`
+
+Do not modify storage, dependencies, configuration, documentation, or unrelated files. Do not commit or push any changes.
+
+Required behavior:
+
+1. Fix `GET /prompts/{prompt_id}` so a missing prompt returns HTTP 404 instead of raising an unhandled exception.
+2. Fix `PUT /prompts/{prompt_id}` so it preserves `id` and `created_at`, refreshes `updated_at`, remains a full update, returns HTTP 404 for a missing prompt, and returns HTTP 400 for a nonexistent non-null collection.
+3. Fix `sort_prompts_by_date()` so it honors both `descending=True` and `descending=False`. The prompts endpoint must return newest prompts first.
+4. Fix `DELETE /collections/{collection_id}` so associated prompts remain stored, their `collection_id` values become `None`, and their `updated_at` values change.
+5. Implement `PATCH /prompts/{prompt_id}` with true partial-update behavior:
+   - Omitted fields remain unchanged.
+   - `description` and `collection_id` may be explicitly cleared with `null`.
+   - `title` and `content` may be omitted but may not be explicitly set to `null`.
+   - A missing prompt returns HTTP 404.
+   - A nonexistent non-null collection returns HTTP 400.
+   - A successful patch refreshes `updated_at`.
+
+Use Pydantic 2.5.3 behavior and `model_dump(exclude_unset=True)` where necessary.
+
+Add or correct tests for every required behavior. Preserve existing working behavior. Before applying changes, explain the proposed implementation and identify the exact functions and tests that will change.
+
+### Output summary
+
+Continue correctly proposed:
+
+- Checking whether `storage.get_prompt()` returned `None` before accessing prompt attributes
+- Refreshing the PUT timestamp with `get_current_time()`
+- Passing the `descending` argument to Python’s `sorted()` function
+- Detaching prompts before deleting their collection
+- Adding a partial-update request model and PATCH route
+- Expanding tests for the repaired behavior
+
+However, the first PATCH proposal used checks such as:
+
+```python
+if patch_data.collection_id is not None:
+```
+
+That condition could not distinguish an omitted field from an explicitly supplied JSON `null`.
+
+The first proposed clear-collection test also created a prompt without assigning it to a collection. A test that patches an already-null value to `null` can pass even if the endpoint does not correctly clear an existing collection reference.
+
+### Verification
+
+I compared the proposal with:
+
+- Pydantic 2.5.3 field-set behavior
+- The existing `PromptUpdate` and `Prompt` models
+- The storage update method
+- The required distinction between omitted and explicitly null PATCH fields
+- The proposed tests’ initial state and final assertions
+
+I verified that `model_dump(exclude_unset=True)` was necessary to distinguish omitted fields from fields explicitly supplied as `null`.
+
+I also verified that the collection-clearing test must:
+
+1. Create a real collection.
+2. Create a prompt assigned to that collection.
+3. Confirm the original non-null relationship.
+4. PATCH `collection_id` to `null`.
+5. Retrieve the prompt again and confirm that the stored relationship was cleared.
+
+### What needed improvement
+
+The initial proposal did not implement true PATCH semantics for nullable fields. Its first collection-clearing test was a false positive because it did not establish a non-null value before attempting to clear it.
+
+The proposed tests also needed to verify stored state after PATCH rather than checking only the immediate response.
+
+### Next iteration
+
+I rejected the first PATCH design and requested a Pydantic 2-specific revision based on explicitly supplied field tracking. I also required tests that establish meaningful preconditions before checking the final state.
+
+## Iteration 5
+
+### Goal
+
+Correct the PATCH design, safely implement all Module 1 requirements, and verify the complete backend rather than accepting AI-generated changes without review.
+
+### Context provided
+
+I used the same four implementation files:
+
+- `backend/app/api.py`
+- `backend/app/models.py`
+- `backend/app/utils.py`
+- `backend/tests/test_api.py`
+
+I also used the installed Pydantic version from `backend/requirements.txt` and the previously verified storage behavior.
+
+### Prompt
+
+Reject the previous PATCH proposal and do not apply it.
+
+The proposal does not correctly distinguish omitted fields from fields explicitly supplied as `null`.
+
+Revise the design using Pydantic 2.5.3 semantics:
+
+1. Use `model_dump(exclude_unset=True)` to obtain only explicitly supplied PATCH fields.
+2. Allow `description: null` and `collection_id: null`.
+3. Allow `title` and `content` to be omitted.
+4. Reject explicitly supplied null values for `title` and `content` with HTTP 422.
+5. Validate `collection_id` only when it was explicitly supplied and is non-null.
+6. Preserve all omitted fields.
+7. Preserve `id` and `created_at`.
+8. Refresh `updated_at`.
+9. Construct a new validated `Prompt` rather than mutating the existing stored object in place.
+10. Correct the clear-collection test so it first creates a real collection and a prompt assigned to it, then confirms the stored value becomes null after PATCH.
+
+Provide the corrected model, endpoint, and tests. Explain why omitted title or content does not invoke the null validator while explicitly supplied null does.
+
+Do not commit or push anything.
+
+### Output summary
+
+Continue revised the endpoint to use:
+
+```python
+patch_data.model_dump(exclude_unset=True)
+```
+
+It also corrected the collection-clearing test so the prompt initially belonged to a real collection.
+
+One intermediate model proposal used Pydantic v1-style validators with `always=True`. That design would validate default `None` values and could reject valid PATCH requests that omitted `title` or `content`.
+
+The final model instead used Pydantic 2’s `field_validator` without forced default validation. Under this design:
+
+- An omitted field is not validated as an explicit null.
+- A supplied `null` for `title` or `content` invokes the validator and produces HTTP 422.
+- Nullable fields remain clearable.
+
+During the first automated editing attempt, Continue inserted duplicate route functions and placed route decorators before the FastAPI application was defined. Pylance reported undefined names and redeclarations. I did not retain those edits.
+
+I restored the four backend files to the clean repository versions and reapplied the required changes in small, reviewed steps.
+
+### Verification
+
+I verified each change separately before running the complete suite.
+
+#### Bug 1: Missing prompt
+
+I ran:
+
+```powershell
+python -m pytest tests/test_api.py::TestPrompts::test_get_prompt_not_found -v
+```
+
+The test passed and confirmed HTTP 404.
+
+#### Bug 2: PUT timestamp
+
+I ran:
+
+```powershell
+python -m pytest tests/test_api.py::TestPrompts::test_update_prompt -v
+```
+
+The test passed and confirmed that:
+
+- `id` was preserved.
+- `created_at` was preserved.
+- `updated_at` changed.
+
+#### Bug 3: Sorting
+
+I ran the endpoint and direct utility tests:
+
+```powershell
+python -m pytest tests/test_api.py::TestPrompts::test_sorting_order tests/test_api.py::TestPrompts::test_sorting_utility_respects_direction -v
+```
+
+Both passed. The tests verify newest-first API results and both values of the utility’s `descending` argument.
+
+#### Bug 4: Collection deletion
+
+I ran:
+
+```powershell
+python -m pytest tests/test_api.py::TestCollections::test_delete_collection_with_prompts -v
+```
+
+The test passed and confirmed that the prompt remained stored, its `collection_id` became `None`, and its timestamp changed.
+
+#### Complete suite
+
+After completing PATCH and expanding the tests, I ran:
+
+```powershell
+python -m pytest tests -v
+```
+
+Final result:
+
+```text
+24 tests collected
+24 tests passed
+0 tests failed
+```
+
+The test run produced deprecation warnings from Starlette, Pydantic, and `datetime.utcnow()`. These warnings were recorded but were not test failures and were outside the required Module 1 bug-fix scope.
+
+I also ran:
+
+```powershell
+git diff --check
+git status --short
+```
+
+`git diff --check` produced no whitespace errors. Git status showed only the intended source, test, and documentation files.
+
+### What needed improvement
+
+The AI-generated implementation could not be accepted as a single unchecked edit. Problems found during review included:
+
+- Incorrect omitted-versus-null PATCH handling
+- A false-positive collection-clearing test
+- Pydantic v1 validation patterns in a Pydantic v2 project
+- Duplicate function declarations
+- Route decorators placed before `app` existed
+- Accidental removal of existing helper functions during full-file replacement
+
+Each problem was corrected through source comparison, Pylance diagnostics, focused tests, Git restoration, and complete-suite testing.
+
+### Final outcome
+
+The completed backend now:
+
+- Returns HTTP 404 for missing prompts
+- Refreshes `updated_at` during PUT
+- Sorts prompts in the requested direction
+- Prevents orphaned prompt references during collection deletion
+- Supports true partial prompt updates
+- Preserves existing utility behavior
+- Passes all 24 tests
+
+### Next iteration
+
+The next step is final documentation and submission verification:
+
+- Update `README.md`
+- Update `docs/SYSTEM_MODEL.md`
+- Create `docs/ai-verification-note.md`
+- Review all Git diffs
+- Run the complete test suite once more
+- Commit and push the final Module 1 work
