@@ -173,6 +173,8 @@ However, explicit formatting constraints did not guarantee factual accuracy. I s
 
 The analysis is closer to the required system model but is not yet accurate enough to copy directly. A final correction pass is necessary for exact route paths, numeric status codes, request validation, test coverage, and file-and-function citations.
 
+## Iteration 3
+
 ### Goal
 
 Produce a final, evidence-checked model of the PromptLab backend that is accurate enough to support `docs/SYSTEM_MODEL.md`. Correct the remaining route, status-code, validation, dependency, and test-coverage errors from Iteration 2 without changing any code.
