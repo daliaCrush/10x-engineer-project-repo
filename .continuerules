@@ -1,0 +1,35 @@
+# PromptLab Project Instructions
+
+## Project context
+- PromptLab is a FastAPI application using Pydantic models and process-local, in-memory storage.
+- Preserve the existing API contract and working behavior.
+- The application currently has no authentication.
+- Do not introduce persistent storage, authentication, or unrelated features.
+
+## Code changes
+- Make the smallest change necessary for the requested task.
+- Do not perform unrelated refactoring.
+- Preserve existing function names, routes, response models, status codes, and error messages unless the specification requires a change.
+- Keep route handling in `backend/app/api.py`, models in `backend/app/models.py`, storage operations in `backend/app/storage.py`, and reusable helpers in `backend/app/utils.py`.
+
+## PATCH behavior
+- PATCH updates only fields explicitly supplied by the client.
+- Use Pydantic’s `model_dump(exclude_unset=True)` to distinguish omitted fields from explicitly supplied null values.
+- Omitted fields remain unchanged.
+- Optional fields such as `description` and `collection_id` may be explicitly cleared with null.
+- Required fields such as `title` and `content` must not accept null.
+- A non-null `collection_id` must reference an existing collection.
+- Preserve the endpoint’s established 404, 400, and validation behavior.
+
+## Documentation
+- Write accurate Google-style docstrings.
+- Use `Args`, `Returns`, and `Raises` sections when applicable.
+- Document behavior observed in the current implementation; do not invent behavior.
+- Keep README and API documentation consistent with the implemented routes and models.
+- Clearly state that storage is in memory and data is lost when the server restarts.
+
+## Verification
+- Add or update focused tests when behavior changes.
+- Run tests from `backend` with:
+  `python -m pytest tests -v`
+- Do not claim a change is complete unless the relevant tests pass.
