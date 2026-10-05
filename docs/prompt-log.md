@@ -535,3 +535,99 @@ The next step is final documentation and submission verification:
 - Review all Git diffs
 - Run the complete test suite once more
 - Commit and push the final Module 1 work
+
+---
+
+## Module 2 — Source Documentation Pass
+
+**Date:** October 5, 2026
+
+### Goal
+
+Review `models.py`, `api.py`, `storage.py`, and `utils.py` and ensure their public classes, functions, endpoint handlers, and storage methods have accurate Google-style docstrings without changing application behavior.
+
+### Context provided
+
+The AI assistant was given:
+
+- `backend/app/models.py`
+- `backend/app/api.py`
+- `backend/app/storage.py`
+- `backend/app/utils.py`
+- The repository-level `.continuerules`
+- Instructions to preserve executable behavior and edit only source documentation
+
+### Initial request
+
+I asked the assistant to inspect the four source modules and add or improve Google-style docstrings. The request explicitly prohibited changes to executable behavior, signatures, route decorators, response models, errors, and tests.
+
+### Initial response and review
+
+The first response changed only `get_prompts_by_collection()` in `storage.py`, even though the `Storage` class and its other methods still lacked docstrings. It also introduced an extra blank line at the end of the file.
+
+I did not accept the result because it did not satisfy the requested scope.
+
+### Follow-up request
+
+I asked the assistant to document the `Storage` class and every method, preserve the existing behavior, avoid claiming that `Storage.delete_collection()` modifies prompts, and remove the whitespace error.
+
+### Follow-up response and review
+
+The follow-up added most method docstrings, but verification found additional problems:
+
+- The `Storage` class still had no docstring.
+- Many unnecessary blank lines were inserted.
+- The module docstring became less clear.
+- The comment `# Global storage instance` was truncated.
+- The required final newline was removed.
+
+Because the generated edit was malformed, I replaced it with a reviewed version that retained the original storage operations while adding accurate documentation.
+
+### Verification
+
+I used Python's `ast` module to check all four required source files. The result showed:
+
+```text
+backend/app/models.py module_docstring=True missing=[]
+backend/app/api.py module_docstring=True missing=[]
+backend/app/storage.py module_docstring=True missing=[]
+backend/app/utils.py module_docstring=True missing=[]
+```
+
+I also ran:
+
+```powershell
+git diff --check
+```
+
+It reported no whitespace errors.
+
+Finally, I ran the complete backend test suite:
+
+```powershell
+python -m pytest tests -v
+```
+
+The result was:
+
+```text
+24 tests collected
+24 tests passed
+0 tests failed
+```
+
+The 44 reported warnings were existing dependency and deprecation warnings, not test failures.
+
+### Decision and outcome
+
+Only `storage.py` required source changes because the other three modules already contained docstrings for their public objects. The completed storage documentation now explains:
+
+- Process-local, in-memory state
+- Prompt and collection creation and retrieval
+- Missing-item return behavior
+- Update and deletion results
+- Collection filtering
+- The scope of collection deletion
+- Test-storage clearing behavior
+
+This iteration demonstrated that the AI-generated documentation required structural, semantic, and whitespace verification before acceptance.
