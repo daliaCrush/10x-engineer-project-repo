@@ -631,3 +631,104 @@ Only `storage.py` required source changes because the other three modules alread
 - Test-storage clearing behavior
 
 This iteration demonstrated that the AI-generated documentation required structural, semantic, and whitespace verification before acceptance.
+
+---
+
+## Module 2 — API Reference Documentation
+
+**Date:** October 5, 2026
+
+### Goal
+
+Create `docs/API_REFERENCE.md` containing accurate, usable documentation for every implemented PromptLab endpoint.
+
+### Context provided
+
+The AI assistant was given read-only access to:
+
+- `backend/app/api.py`
+- `backend/app/models.py`
+- `backend/app/storage.py`
+- `backend/app/utils.py`
+- `backend/tests/test_api.py`
+- `README.md`
+
+The request required endpoint parameters, request and response examples, status codes, errors, `curl` examples, PATCH semantics, authentication status, and storage behavior.
+
+### Initial response and review
+
+The initial API reference was not accepted because it:
+
+- Used malformed and escaped Markdown.
+- Did not include the required `curl` examples.
+- Omitted required sections from several endpoints.
+- Incorrectly stated that `GET /prompts` returns `400` for an unknown `collection_id`.
+- Described PUT requirements imprecisely.
+- Separated important PATCH behavior from the PATCH endpoint documentation.
+
+During this attempt, an unrelated malformed `storage.py` edit also caused a syntax error and prevented `api.py` from importing. I restored `storage.py` from the verified `HEAD` commit and reran the complete test suite. All 24 tests passed.
+
+### Source verification
+
+I inspected the route handlers and Pydantic models directly. I also generated the runtime route inventory:
+
+```text
+GET /health
+GET /prompts
+GET /prompts/{prompt_id}
+POST /prompts
+PUT /prompts/{prompt_id}
+PATCH /prompts/{prompt_id}
+DELETE /prompts/{prompt_id}
+GET /collections
+GET /collections/{collection_id}
+POST /collections
+DELETE /collections/{collection_id}
+```
+
+This confirmed that the application implements 11 documented endpoints.
+
+Source inspection also established that:
+
+- `GET /prompts` accepts only `collection_id` and `search`.
+- An unknown collection filter does not produce an application error.
+- PUT requires `title` and `content`; omitted optional fields become null.
+- PATCH preserves omitted fields and permits explicit null only for optional fields.
+- PATCH refreshes `updated_at`, including for an empty request object.
+- Collection deletion keeps associated prompts, clears their `collection_id`, and refreshes their timestamps.
+- Storage is process-local and in memory.
+- The API has no authentication or authorization.
+
+### Corrected result
+
+I replaced the incomplete draft with a source-verified API reference containing:
+
+- All 11 endpoint headings
+- One `curl` example for every endpoint
+- Request and response examples
+- Model field requirements
+- Implemented status codes and errors
+- PUT and PATCH semantics
+- Collection deletion behavior
+- Authentication and storage limitations
+- A representative FastAPI 422 response
+
+### Verification
+
+I ran structural checks against the completed document:
+
+```powershell
+(Select-String -Path docs/API_REFERENCE.md -Pattern "^## (GET|POST|PUT|PATCH|DELETE) ").Count
+(Select-String -Path docs/API_REFERENCE.md -Pattern "^curl ").Count
+git diff --check
+```
+
+The results were:
+
+```text
+11 endpoint headings
+11 curl examples
+No whitespace errors
+```
+
+This iteration showed that generated API documentation must be compared with route handlers, request models, tests, and the runtime route inventory before acceptance.
